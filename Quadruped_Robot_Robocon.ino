@@ -28,9 +28,18 @@
 /* Includes ------------------------------------------------------------------*/
 #include <Servo.h>    //to define and control servos
 #include <FlexiTimer2.h>//to set a timer to manage all servos
+
+
+#include <SoftwareSerial.h>
+#include <CytronServoShield.h>
+
+SoftwareSerial swSerial1(2, 3);
+SoftwareSerial swSerial2(10, 11);
+
 /* Servos --------------------------------------------------------------------*/
 //define 12 servos for 4 legs
-Servo servo[4][3];
+CytronServoShield servo1;
+CytronServoShield servo2;
 //define servos' ports
 const int servo_pin[4][3] = {{2, 3, 4}, {5, 6, 7}, {8, 9, 10}, {11, 12, 13} };
 const float servo_error[4][3] = { {-5,0,0}, {10,-5,10}, {-5,0,0}, {2,-10,0} }; // JC needed to get servo arm at 90 degrees to the body when set to 90 degrees by program. used in polar_to_servo
@@ -83,8 +92,8 @@ float move_speed;     //movement speed
 float speed_multiple = 1; //movement speed multiple
 int leg_position; // one of WALK, RELAX, SPRAWL
 const float spot_turn_speed = 4;
-const float leg_move_speed = 7;
-const float body_move_speed = 5;
+const float leg_move_speed = 3;
+const float body_move_speed = 2;
 const float stand_seat_speed = 1;
 const float gyrate_speed =0.8;
 const float bow_speed = 1;
@@ -135,6 +144,18 @@ void setup()
 {
   //start serial for debug
   Serial.begin(9600); // baud rate chosen for bluetooth compatability
+
+  swSerial1.begin(9600);
+  servo1.init(&swSerial1);
+  //  For boards in which compiler is not avr-gcc, and SoftwareSerial is used and listen() function is available
+  //  use the function below instead to init servo shield
+  //  servo1.init(&swSerial1, []{ swSerial1.listen() });
+  swSerial2.begin(9600);
+  servo2.init(&swSerial2);
+
+  servo1.setChannel(ALL_CHANNELS, ON);
+  servo2.setChannel(ALL_CHANNELS, ON);
+
   
   Serial.println("Robot starts initialization");
   //initialize default parameter
@@ -142,7 +163,7 @@ void setup()
   set_site(1, x_default - x_offset, y_start + y_step, z_boot);
   set_site(2, x_default + x_offset, y_start, z_boot);
   set_site(3, x_default + x_offset, y_start, z_boot);
-  
+//  
   leg_position=WALK;
   
   for (int i = 0; i < 4; i++)
@@ -167,7 +188,7 @@ void setup()
     }
     // Start voltage checker
     Serial.println("Voltage being monitored");
-    monitor_voltage = TRUE;
+    monitor_voltage = FALSE;
   }
   else
   {
@@ -179,53 +200,34 @@ void setup()
   FlexiTimer2::start();
   Serial.println("Servo service started");
   //initialize servos
-  servo_attach();
+  //servo_attach();
   Serial.println("Servos initialized");
   Serial.println("Robot initialization Complete");
 }
 
 
-void servo_attach(void)
-{
-  for (int i = 0; i < 4; i++)
-  {
-    for (int j = 0; j < 3; j++)
-    {
-      servo[i][j].attach(servo_pin[i][j]);
-      delay(100);
-    }
-  }
-}
-
-void servo_detach(void)
-{
-  for (int i = 0; i < 4; i++)
-  {
-    for (int j = 0; j < 3; j++)
-    {
-      servo[i][j].detach();
-      delay(100);
-    }
-  }
-}
 /*
   -  function
    ---------------------------------------------------------------------------*/
 void loop()
 {
  //leg position test 
-/*  relax_legs();
-  set_site(0, KEEP, KEEP, z_default - z_bow_relative);
-  set_site(1, KEEP, KEEP, z_default - z_bow_relative);
-  set_site(2, KEEP, KEEP, z_default - z_bow_relative);
-  set_site(3, KEEP, KEEP, z_default - z_bow_relative);
-*/  
+/*  relax_legs();*/
+//  servo_write(0, 0, 90);
+//  servo_write(0, 1, 90);
+//  servo_write(0, 2, 90);
+//  delay(2000);
+  //set_site(0, KEEP, KEEP, z_default - z_bow_relative);
+//  set_site(1, KEEP, KEEP, z_default - z_bow_relative);
+//  set_site(2, KEEP, KEEP, z_default - z_bow_relative);
+//  set_site(3, KEEP, KEEP, z_default - z_bow_relative);
+//*/  
   
   Serial.println("Stand");
   stand();
   delay(2000);
-
-  Serial.println("Step forward");
+//
+//  Serial.println("Step forward");
   step_forward(10);
  // Serial.println("Step back");
   //step_back(10);
@@ -1459,6 +1461,58 @@ void cartesian_to_polar(volatile float &alpha, volatile float &beta, volatile fl
   gamma = gamma / pi * 180;
 }
 
+servo_channel_t servo_to_channel(int servo, int option){
+  servo_channel_t channel;
+  switch(option) {
+    case 0:
+      switch(servo){
+        case 0:
+          channel = CHANNEL_2;
+          break;
+        case 1:
+          channel = CHANNEL_1;
+          break;
+        case 2:
+          channel = CHANNEL_3;
+          break;
+      }
+      break;
+    case 1:
+      switch(servo){
+        case 0:
+          channel = CHANNEL_7;
+          break;
+        case 1:
+          channel = CHANNEL_6;
+          break;
+        case 2:
+          channel = CHANNEL_8;
+          break;
+      }
+      break;
+  }
+  return channel;
+}
+
+void servo_write(int leg, int servo, int angle){
+  //s1 Channel 1 is alpha
+  
+  switch(leg){
+    case 0:
+      servo1.angle(servo_to_channel(servo, 0), angle);
+      break;
+    case 1:
+      servo1.angle(servo_to_channel(servo, 1), angle);
+      break;
+    case 2:
+      servo2.angle(servo_to_channel(servo, 0), angle);
+      break;
+    case 3:
+      servo2.angle(servo_to_channel(servo, 1), angle);
+      break;
+  }
+}
+
 /*
   - trans site from polar to microservos
   - mathematical model map to fact
@@ -1472,38 +1526,49 @@ void polar_to_servo(int leg, float alpha, float beta, float gamma) //may need to
   
   if (leg == 0)
   {
-    alpha = 90 - alpha;
-    beta = beta;
-    gamma += 0; // I changed to 0, to avoid angle reach 140+
+    alpha = 90 + alpha;
+    beta = 180 - beta;
+    gamma = 90 - gamma; // I changed to 0, to avoid angle reach 140+
   }
   else if (leg == 1)
-  {
-    alpha += 90;
-    beta = 180 - beta;
-    gamma = 90 - gamma;
-  }
-  else if (leg == 2)
-  {
-    alpha = 90  - alpha;
-    beta = beta;
-    gamma = 90 - gamma;
-  }
-  else if (leg == 3)
   {
     alpha = 90 - alpha;
     beta = beta;
     gamma += 90;
   }
-  
-  if (capture)  // debug data
+  else if (leg == 2)
   {
-      Serial.println("A\t "+String(leg)+"\t"+String(alpha)+"\t"+String(beta)+"\t"+String(gamma));
+    alpha = 90  - alpha;
+    beta = beta;
+    gamma += 90;
+  }
+  else if (leg == 3)
+  {
+    alpha = 90 + alpha;
+    beta = 180 - beta;
+    gamma = 90 - gamma;
   }
   
-  servo[leg][0].write(alpha);
+  if (leg == 0)  // debug data
+  {
+      Serial.println("A\t "+String(leg)+"\t"+String(alpha)+"\t"+String(beta)+"\t"+String(gamma));
+      servo_write(leg, 0, alpha);
+      servo_write(leg, 1, beta);
+      servo_write(leg, 2, gamma);
+  
+  } else {
+    servo_write(leg, 0, 90);
+      servo_write(leg, 1, 90);
+      servo_write(leg, 2, 90);
+  }
+
+  /*servo[leg][0].write(alpha);
   servo[leg][1].write(beta);
-  servo[leg][2].write(gamma);
+  servo[leg][2].write(gamma);*/
 }
+
+
+
 /*
   - check lipo voltage to see if it is below minimum
   - blocking if voltage less than minimum
@@ -1536,7 +1601,7 @@ void voltage_check_service(void)
       cell_under_voltage=TRUE;
       if (count_on_under_voltage++ >= consecutive_under_voltage_readings) // x consecutive under voltage readings cause robot to stop
       {
-        servo_detach();
+        //servo_detach();
         while(1)
         {
           delay(10000);
