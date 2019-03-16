@@ -1,31 +1,9 @@
-/* -----------------------------------------------------------------------------
-  - Project: Remote control Crawling robot
-  - Author:  panerqiang@sunfounder.com
-  - Date:  2015/1/27
-   -----------------------------------------------------------------------------
-  - Overview
-  - This project was written for the Crawling robot desigened by Sunfounder.
-    This version of the robot has 4 legs, and each leg is driven by 3 servos.
-  This robot is driven by a Ardunio Nano Board with an expansion Board.
-  We recommend that you view the product documentation before using.
-  - Request
-  - This project requires some library files, which you can find in the head of
-    this file. Make sure you have installed these files.
-  - How to
-  - Before use,you must to adjust the robot,in order to make it more accurate.
-    - Adjustment operation
-    1.uncomment ADJUST, make and run
-    2.comment ADJUST, uncomment VERIFY
-    3.measure real sites and set to real_site[4][3], make and run
-    4.comment VERIFY, make and run
-  The document describes in detail how to operate.
-   ---------------------------------------------------------------------------*/
-
 // modified by Regis for spider project
 // modified by John Crombie
 // Added additional moves and LiPo battery monitor on balance connector
 
 /* Includes ------------------------------------------------------------------*/
+#include <Servo.h>    //to define and control servos
 #include <FlexiTimer2.h>//to set a timer to manage all servos
 
 
@@ -40,12 +18,30 @@ SoftwareSerial swSerial2(10, 11);
 CytronServoShield servo1;
 CytronServoShield servo2;
 //define servos' ports
-const int servo_pin[4][3] = { {2, 3, 4}, {5, 6, 7}, {8, 9, 10}, {11, 12, 13} };
-const float servo_error[4][3] = { {-10,-10,0}, {0,0,0}, {-10,-10,0}, {0,0,0} }; // JC needed to get servo arm at 90 degrees to the body when set to 90 degrees by program. used in polar_to_servo
+const int servo_pin[4][3] = {{2, 3, 4}, {5, 6, 7}, {8, 9, 10}, {11, 12, 13} };
+const float servo_error[4][3] = { {-5,0,0}, {10,-5,10}, {-5,0,0}, {2,-10,0} }; // JC needed to get servo arm at 90 degrees to the body when set to 90 degrees by program. used in polar_to_servo
 const float servo_test[4][3] = { {93.11,86.71,132.83},{129.99,125.99,47.17},{119.99,120.99,57.17},{16.83,30.43,122.83}}; // test angles
 
+/*
+ *  Spider Leg Label
+ *           beta
+ *            +
+ *          a/ \
+ *    c     /   \b
+ * +-------+     \ 
+ * gamma   alpha  \
+ *                 \   
+ *                  
+ * 
+ * Leg Position when all servo is 90                  
+ *  c   a
+ *+---+---+                     
+ *        |
+ *        |b
+ *        |
+ */
 
-const int angle_treshold = 30;
+
 /* Size of the robot (mm) ---------------------------------------------------------*/
 const float length_a = 80;
 const float length_b = 245;
@@ -54,7 +50,7 @@ const float length_side = 210;
 const float z_absolute = -180; //Initial z position when robot is started; Position is relative to base/servo closest to base
 /* Constants for movement ----------------------------------------------------*/
 const float z_default = -180; //Default z position when standing and walking
-const float z_up = -130; //How high should the leg be raised during the walking
+const float z_up = -140; //How high should the leg be raised during the walking
 const float z_boot = z_absolute, z_bow_relative = 25, z_tall = -260; //used for tall and bow function, unnecessary
 const float x_default = 130, x_offset = 0; //Default x position during walking and standing
 const float y_start = 0, y_step = 80; //starting y position during walking and how big should the step be
@@ -66,18 +62,16 @@ const bool FALSE = 0;
 const bool TRUE = 1;
 /* variables for movement ----------------------------------------------------*/
 volatile float site_now[4][3];    //real-time coordinates of the end of each leg
-volatile float angle_expect[4][3];
 volatile float site_expect[4][3]; //expected coordinates of the end of each leg
-volatile bool capture = true;
+volatile bool capture = FALSE; //enable to print for debugging
 float temp_speed[4][3];   //each axis' speed, needs to be recalculated before each movement
 float move_speed;     //movement speed
 float speed_multiple = 1; //movement speed multiple
 int leg_position; // one of WALK, RELAX, SPRAWL
-//speed , slowest - fastest (1 - 100), 0 = instant
-const float spot_turn_speed = 40;
-const float leg_move_speed = 100;
-const float body_move_speed = 100;
-const float stand_seat_speed = 40;
+const float spot_turn_speed = 4;
+const float leg_move_speed = 3;
+const float body_move_speed = 2;
+const float stand_seat_speed = 1;
 const float gyrate_speed =0.8;
 const float bow_speed = 1;
 volatile int rest_counter;      //+1/0.02s, for automatic rest
@@ -98,8 +92,8 @@ const float turn_y1 = y_start + y_step / 2;
 const float turn_x0 = turn_x1 - temp_b * cos(temp_alpha);
 const float turn_y0 = temp_b * sin(temp_alpha) - turn_y1 - length_side;
 /* JC Constants for twists from relaxed pose ---------------------------------*/
-const float robot_side_length = 70.84; // pivot to pivot
-const float robot_front_length = 77.92; // pivot to pivot
+const float robot_side_length = 210; // pivot to pivot
+const float robot_front_length = 210; // pivot to pivot
 const float robot_centre_to_pivot = sqrt(pow(robot_side_length/2,2)+pow(robot_front_length/2,2)); 
 const float move_angle = 15; // amount to move each direction
 const float temp_hyp = sqrt(pow(x_default - x_offset,2) + pow(y_start + y_step,2)) + robot_centre_to_pivot;
@@ -139,8 +133,6 @@ void setup()
   servo1.setChannel(ALL_CHANNELS, ON);
   servo2.setChannel(ALL_CHANNELS, ON);
 
-  //for(int i=0;i<4;i++){ polar_to_servo(i, 30, 60, 45);}
-  //delay(2000);
   
   Serial.println("Robot starts initialization");
   //initialize default parameter
@@ -148,7 +140,7 @@ void setup()
   set_site(1, x_default - x_offset, y_start + y_step, z_boot);
   set_site(2, x_default + x_offset, y_start, z_boot);
   set_site(3, x_default + x_offset, y_start, z_boot);
-  //wait_all_reach();
+//  
   leg_position=WALK;
   
   for (int i = 0; i < 4; i++)
@@ -188,36 +180,136 @@ void setup()
   //servo_attach();
   Serial.println("Servos initialized");
   Serial.println("Robot initialization Complete");
-
-  //for(int i=0;i<4;i++){ polar_to_servo(i, 30, 60, 45);}
-  //delay(4000);
 }
 
 
 /*
-  - loop function
+  -  function
    ---------------------------------------------------------------------------*/
 void loop()
 {
  //leg position test 
-/*  relax_legs();
-  set_site(0, KEEP, KEEP, z_default - z_bow_relative);
-  set_site(1, KEEP, KEEP, z_default - z_bow_relative);
-  set_site(2, KEEP, KEEP, z_default - z_bow_relative);
-  set_site(3, KEEP, KEEP, z_default - z_bow_relative);
-*/  
-
-  // Serial.println("Stand");
-  //stand();
-  //delay(2000);
-  Serial.println("Forward");
-  step_forward(4);
-
+/*  relax_legs();*/
+//  servo_write(0, 0, 90);
+//  servo_write(0, 1, 90);
+//  servo_write(0, 2, 90);
+//  delay(2000);
+  //set_site(0, KEEP, KEEP, z_default - z_bow_relative);
+//  set_site(1, KEEP, KEEP, z_default - z_bow_relative);
+//  set_site(2, KEEP, KEEP, z_default - z_bow_relative);
+//  set_site(3, KEEP, KEEP, z_default - z_bow_relative);
+//*/  
   
+  Serial.println("Stand");
+  stand();
+  delay(2000);
+//
+//  Serial.println("Step forward");
+  step_forward(10);
+ // Serial.println("Step back");
+  //step_back(10);
+  //delay(2000);
+  
+// JC added moves
+/*  
+  Serial.println("Relaxed Pose");
+  relax_legs();
+  delay(2000);
+  Serial.println("Sprawl");
+  sprawl();
+  delay(2000);
+// end of JC added moves
+  Serial.println("Step forward");
+  step_forward(5);
+  delay(2000);
+  Serial.println("Step back");
+  step_back(5);
+  delay(2000);
+  Serial.println("Turn left");
+  turn_left(5);
+  delay(2000);
+  Serial.println("Turn right");
+  turn_right(5);
+  delay(2000);
+  Serial.println("Hand wave");
+  hand_wave(3);
+  delay(2000);
+  Serial.println("Hand wave");
+  hand_shake(3);
+  delay(2000);  
+  Serial.println("Sit");
+  sit();
+  delay(5000);
+  */
 }
 
+// Start of added JC move routines
+/*
+  - JC
+  - body gyration movement
+  - blocking function
+   ---------------------------------------------------------------------------*/
+void gyrate(unsigned int number_of_times)
+{
+  // set leg starting position
+  relax_legs();
+  move_speed = gyrate_speed;
+  //capture = TRUE;
+  set_site(0, KEEP, KEEP, z_default - z_bow_relative);
+  set_site(3, KEEP, KEEP, z_default + z_bow_relative);
+  wait_all_reach();
+  
+  while(number_of_times-- > 0)
+  {
+    set_site(2, KEEP, KEEP, z_default - z_bow_relative);
+    set_site(1, KEEP, KEEP, z_default + z_bow_relative);
+    set_site(0, KEEP, KEEP, z_default);
+    set_site(3, KEEP, KEEP, z_default);
+    wait_all_reach();
+    
+    set_site(3, KEEP, KEEP, z_default - z_bow_relative);
+    set_site(0, KEEP, KEEP, z_default + z_bow_relative);
+    set_site(2, KEEP, KEEP, z_default);
+    set_site(1, KEEP, KEEP, z_default);
+    wait_all_reach();
+    
+    set_site(1, KEEP, KEEP, z_default - z_bow_relative);
+    set_site(2, KEEP, KEEP, z_default + z_bow_relative);
+    set_site(3, KEEP, KEEP, z_default);
+    set_site(0, KEEP, KEEP, z_default);
+    wait_all_reach();
+    
+    set_site(0, KEEP, KEEP, z_default - z_bow_relative);
+    set_site(3, KEEP, KEEP, z_default + z_bow_relative);
+    set_site(1, KEEP, KEEP, z_default);
+    set_site(2, KEEP, KEEP, z_default);
+    wait_all_reach();    
+  }
+  
+  // return legs to starting position
+  set_site(1, KEEP, KEEP, z_default);
+  set_site(3, KEEP, KEEP, z_default);
+  capture = FALSE;
+  wait_all_reach();
+}
 
-  /*
+void tall( int time)
+{
+  relax_legs();
+  move_speed = bow_speed;
+  set_site(0, KEEP, KEEP, z_tall);
+  set_site(2, KEEP, KEEP, z_tall);
+  set_site(1, KEEP, KEEP, z_tall);
+  set_site(3, KEEP, KEEP, z_tall);
+  wait_all_reach();
+  delay(time);
+  set_site(0, KEEP, KEEP, z_default);
+  set_site(2, KEEP, KEEP, z_default);
+  set_site(1, KEEP, KEEP, z_default);
+  set_site(3, KEEP, KEEP, z_default);
+  wait_all_reach();
+}
+
   - JC
   - Change_legs to for a X for a relaxed pose
   - blocking function
@@ -832,14 +924,37 @@ void body_right(int i)
 }
 
 
-
 /*
   - microservos service /timer interrupt function/50Hz
   - when set site expected,this function move the end point to it in a straight line
   - temp_speed[4][3] should be set before set expect site,it make sure the end point
    move in a straight line,and decide move speed.
    ---------------------------------------------------------------------------*/
+void servo_service(void)
+{
+  sei();
+  static float alpha, beta, gamma;
 
+  for (int i = 0; i < 4; i++)
+  {
+    for (int j = 0; j < 3; j++)
+    {
+      if (abs(site_now[i][j] - site_expect[i][j]) >= abs(temp_speed[i][j]))
+        site_now[i][j] += temp_speed[i][j];
+      else
+        site_now[i][j] = site_expect[i][j];
+    }
+
+    cartesian_to_polar(alpha, beta, gamma, site_now[i][0], site_now[i][1], site_now[i][2]);
+    polar_to_servo(i, alpha, beta, gamma);
+  }
+
+  rest_counter++;
+  if (( rest_counter % 500 == 0) && (monitor_voltage))
+  {
+    voltage_check_service();
+  }
+}
 
 /*
   - set one of end points' expect site
@@ -849,6 +964,7 @@ void body_right(int i)
 void set_site(int leg, float x, float y, float z)
 {
   float length_x = 0, length_y = 0, length_z = 0;
+  
   if (capture)
   {
     Serial.println("P, "+String(leg)+", "+String(x)+", "+String(y)+", "+String(z)); // log the set leg position
@@ -867,8 +983,6 @@ void set_site(int leg, float x, float y, float z)
   temp_speed[leg][1] = length_y / length * move_speed * speed_multiple;
   temp_speed[leg][2] = length_z / length * move_speed * speed_multiple;
 
-//  Serial.println("A\t "+String(i)+"\t"+String(temp_speed[leg][0])+"\t"+String(temp_speed[leg][1])+"\t"+String(temp_speed[leg][2]));
-
   if (x != KEEP)
     site_expect[leg][0] = x;
   if (y != KEEP)
@@ -883,12 +997,10 @@ void set_site(int leg, float x, float y, float z)
    ---------------------------------------------------------------------------*/
 void wait_reach(int leg)
 {
-  delay(70);
-  return;//for faster movement
   while (1)
-    if (abs(angle_expect[leg][0] - servo_get_angle(leg, 0)) < angle_treshold)
-      if (abs(angle_expect[leg][1] - servo_get_angle(leg, 1)) < angle_treshold)
-        if (abs(angle_expect[leg][2] - servo_get_angle(leg, 2)) < angle_treshold)
+    if (site_now[leg][0] == site_expect[leg][0])
+      if (site_now[leg][1] == site_expect[leg][1])
+        if (site_now[leg][2] == site_expect[leg][2])
           break;
 }
 
@@ -909,31 +1021,17 @@ void wait_all_reach(void)
 void cartesian_to_polar(volatile float &alpha, volatile float &beta, volatile float &gamma, volatile float x, volatile float y, volatile float z)
 {
   //calculate w-z degree
-  //Serial.println("C\t \t"+String(x)+"\t"+String(y)+"\t"+String(z));
-  float v, w, temp_alpha, temp_beta;
+  float v, w;
   w = (x >= 0 ? 1 : -1) * (sqrt(pow(x, 2) + pow(y, 2)));
   v = w - length_c;
-
-  temp_alpha = (pow(length_a, 2) - pow(length_b, 2) + pow(v, 2) + pow(z, 2)) / 2 / length_a / sqrt(pow(v, 2) + pow(z, 2));
-  temp_alpha = constrain(temp_alpha, -1, 1);
-  alpha = atan2(z, v) + acos(temp_alpha);
-  temp_beta = (pow(length_a, 2) + pow(length_b, 2) - pow(v, 2) - pow(z, 2)) / 2 / length_a / length_b;
-  temp_beta = constrain(temp_beta, -1, 1);
-  beta = acos(temp_beta);
+  alpha = atan2(z, v) + acos((pow(length_a, 2) - pow(length_b, 2) + pow(v, 2) + pow(z, 2)) / 2 / length_a / sqrt(pow(v, 2) + pow(z, 2)));
+  beta = acos((pow(length_a, 2) + pow(length_b, 2) - pow(v, 2) - pow(z, 2)) / 2 / length_a / length_b);
   //calculate x-y-z degree
   gamma = (w >= 0) ? atan2(y, x) : atan2(-y, -x);
   //trans degree pi->180
   alpha = alpha / pi * 180;
   beta = beta / pi * 180;
   gamma = gamma / pi * 180;
-
-  if(false) {
-    Serial.println("\nx: "+String(x)+" y: "+String(y)+" z: "+String(z));
-    Serial.println("w: "+String(w)+" v: "+String(v));
-    Serial.println("alpha = "+String(atan2(z,v))+" + acos(("+String(length_a)+"^2 - "+String(length_b)+"^2 + "+String(z)+"^2 + "+String(v)+"^2) / 2 / "+String(length_a)+" / sqrt("+String(v)+"^2 +" +String(z)+"^2) *180/pi= "+String(alpha));
-    Serial.println("beta = acos(("+String(length_a)+"^2 + "+String(length_b)+"^2 - "+String(v)+"^2 - "+String(z)+"^2)/ 2 / "+String(length_a)+"/ "+String(length_b)+" * 180/pi= "+ String(beta));
-    Serial.println("gamma = atan2("+String(y)+", "+String(x)+") = "+String(gamma));
-  }
 }
 
 servo_channel_t servo_to_channel(int servo, int option){
@@ -958,10 +1056,10 @@ servo_channel_t servo_to_channel(int servo, int option){
           channel = CHANNEL_7;
           break;
         case 1:
-          channel = CHANNEL_8;
+          channel = CHANNEL_6;
           break;
         case 2:
-          channel = CHANNEL_6;
+          channel = CHANNEL_8;
           break;
       }
       break;
@@ -971,46 +1069,21 @@ servo_channel_t servo_to_channel(int servo, int option){
 
 void servo_write(int leg, int servo, int angle){
   //s1 Channel 1 is alpha
-  servo_write(leg, servo, angle, 100);
-}
-
-void servo_write(int leg, int servo, int angle, int speed){
-  //s1 Channel 1 is alpha
   
   switch(leg){
     case 0:
-      servo1.angle(servo_to_channel(servo, 0), angle, speed);
+      servo1.angle(servo_to_channel(servo, 0), angle);
       break;
     case 1:
-      servo2.angle(servo_to_channel(servo, 0), angle, speed);
+      servo1.angle(servo_to_channel(servo, 1), angle);
       break;
     case 2:
-      servo1.angle(servo_to_channel(servo, 1), angle, speed);
+      servo2.angle(servo_to_channel(servo, 0), angle);
       break;
     case 3:
-      servo2.angle(servo_to_channel(servo, 1), angle, speed);
+      servo2.angle(servo_to_channel(servo, 1), angle);
       break;
   }
-}
-
-int servo_get_angle(int leg, int servo){
-  //s1 Channel 1 is alpha
-  int angle = 0;
-  switch(leg){
-    case 0:
-      angle = servo1.getAngle(servo_to_channel(servo, 0));
-      break;
-    case 1:
-      angle = servo2.getAngle(servo_to_channel(servo, 0));
-      break;
-    case 2:
-      angle = servo1.getAngle(servo_to_channel(servo, 1));
-      break;
-    case 3:
-      angle = servo2.getAngle(servo_to_channel(servo, 1));
-      break;
-  }
-  return angle;
 }
 
 /*
@@ -1018,7 +1091,7 @@ int servo_get_angle(int leg, int servo){
   - mathematical model map to fact
   - the errors saved in eeprom will be add
    ---------------------------------------------------------------------------*/
-void polar_to_servo(int leg, float alpha, float beta, float gamma)
+void polar_to_servo(int leg, float alpha, float beta, float gamma) //may need to change something here, based on how the leg is attached (Rashad)
 {
   alpha += servo_error[leg][0];
   beta += servo_error[leg][1];
@@ -1048,25 +1121,27 @@ void polar_to_servo(int leg, float alpha, float beta, float gamma)
     beta = 180 - beta;
     gamma = 90 - gamma;
   }
-
-  alpha = constrain(alpha, 0, 180);
-  beta = constrain(beta, 0, 180);
-  gamma = constrain(gamma, 0, 180);
-
-  if (leg == 0)
+  
+  if (leg == 0)  // debug data
   {
-    //Serial.println("A\t "+String(leg)+"\t"+String(alpha)+"\t"+String(beta)+"\t"+String(gamma));
+      Serial.println("A\t "+String(leg)+"\t"+String(alpha)+"\t"+String(beta)+"\t"+String(gamma));
+      servo_write(leg, 0, alpha);
+      servo_write(leg, 1, beta);
+      servo_write(leg, 2, gamma);
+  
+  } else {
+    servo_write(leg, 0, 90);
+      servo_write(leg, 1, 90);
+      servo_write(leg, 2, 90);
   }
 
-  angle_expect[leg][0] = alpha;
-  angle_expect[leg][1] = beta;
-  angle_expect[leg][2] = gamma;
-  
-
-  servo_write(leg, 0, alpha, move_speed);
-  servo_write(leg, 1, beta, move_speed);
-  servo_write(leg, 2, gamma, move_speed);
+  /*servo[leg][0].write(alpha);
+  servo[leg][1].write(beta);
+  servo[leg][2].write(gamma);*/
 }
+
+
+
 /*
   - check lipo voltage to see if it is below minimum
   - blocking if voltage less than minimum
@@ -1111,31 +1186,4 @@ void voltage_check_service(void)
   {
     count_on_under_voltage = 0;
   } 
-}
-
-void servo_service(void)
-{
-  sei();
-  static float alpha, beta, gamma;
-
-  for (int i = 0; i < 4; i++)
-  {
-    for (int j = 0; j < 3; j++)
-    {
-      if (abs(site_now[i][j] - site_expect[i][j]) >= abs(temp_speed[i][j]))
-        site_now[i][j] += temp_speed[i][j];
-      else
-        site_now[i][j] = site_expect[i][j];
-    }
-    //Serial.println("S\t "+String(i)+"\t"+String(site_expect[i][0])+"\t"+String(site_expect[i][1])+"\t"+String(site_expect[i][2]));
-    cartesian_to_polar(alpha, beta, gamma, site_expect[i][0], site_expect[i][1], site_expect[i][2]);
-    //Serial.println("A\t "+String(i)+"\t"+String(alpha)+"\t"+String(beta)+"\t"+String(gamma));
-    polar_to_servo(i, alpha, beta, gamma);
-  }
-
-  rest_counter++;
-  if (( rest_counter % 500 == 0) && (monitor_voltage) && false)
-  {
-    //voltage_check_service();
-  }
 }
